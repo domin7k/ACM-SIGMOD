@@ -111,6 +111,16 @@ ErrorCode;
 //*********************************************************************************************
 
 /**
+ * Computes the hamming distance between two strings.
+ */
+int hamming_distance(const char* a, const char* b);
+
+/**
+ * Computes the edit distance between two strings.
+ */
+int edit_distance(const char* a, const char* b, int maxDist);
+
+/**
 * Called only once at the beginning of the whole test.
 * Performs any required initializations. 
 */
