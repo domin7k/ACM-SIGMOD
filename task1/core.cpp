@@ -26,9 +26,9 @@ int min(int a, int b, int c) {
 }
 
 int edit_distance(const char* a, const char* b, int nb, int maxDist) {
-    std::size_t length = std::strlen(a) + 1;
-    size_t width = nb + 1;
-    size_t matrix[length][width];
+    int length = std::strlen(a) + 1;
+    int width = nb + 1;
+    int matrix[length][width];
     int minDist;
     for (int i = 0; i < length; i++) {
         minDist = maxDist;
