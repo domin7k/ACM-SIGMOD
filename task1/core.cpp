@@ -4,6 +4,8 @@
 #include <unordered_map>
 #include <stdlib.h>
 #include <cassert>
+#include <iostream>
+#include <map>
 
 
 // computes hamming distance between a and b (both null terminated strings). 
@@ -51,6 +53,13 @@ int edit_distance(const char* a, const char* b, int nb, int maxDist) {
             return maxDist;
         }
     }
+    // if ((matrix[length - 1][width - 1] > maxDist ? maxDist : matrix[length - 1][width - 1]) < maxDist) {
+    //     std::cout << "edit distance: " << matrix[length - 1][width - 1] << " for " << a << " and ";
+    //     for (int i = 0; i < nb; i++) {
+    //         std::cout << b[i];
+    //     }
+    //     std::cout << std::endl;
+    // }
     return matrix[length - 1][width - 1] > maxDist ? maxDist : matrix[length - 1][width - 1];
 }
 
@@ -59,7 +68,7 @@ struct QueryElement
     QueryID query_id;
     const char* query_str;
     MatchType match_type;
-    unsigned int match_dist;
+    int match_dist;
 };
 
 struct Query {
@@ -72,7 +81,7 @@ struct Query {
 struct Document
 {
     DocID doc_id;
-    unsigned int num_res;
+    int num_res;
     QueryID* query_ids;
 };
 
@@ -99,6 +108,9 @@ ErrorCode DestroyIndex() {
 }
 
 ErrorCode StartQuery(QueryID query_id, const char* query_str, MatchType match_type, unsigned int match_dist) {
+    // if (match_type == MT_EDIT_DIST) {
+    //     std::cout << query_id << ": " << query_str << std::endl;
+    // }
     char* mutable_query_str = strdup(query_str);
     const char* c_start = mutable_query_str;
     int num_queries_start = num_queries;
@@ -116,6 +128,15 @@ ErrorCode StartQuery(QueryID query_id, const char* query_str, MatchType match_ty
             *it = '\0'; // null terminate word
         }
     }
+    // add last word
+    QueryElement qu;
+    qu.query_id = query_id;
+    qu.query_str = c_start;
+    qu.match_type = match_type;
+    qu.match_dist = match_dist;
+    queries.push_back(qu);
+    num_queries++;
+
     Query q;
     q.query_id = query_id;
     q.start = num_queries_start;
@@ -152,7 +173,11 @@ ErrorCode EndQuery(QueryID query_id) {
 }
 
 ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
-    std::unordered_map<QueryID, int> query_match_count;
+    // if (doc_id == 48) {
+    //     std::cout << "doc_id: " << doc_id << " doc_str: " << doc_str << std::endl;
+    // }
+
+    std::map<QueryID, int> query_match_count;
     std::unordered_map<const QueryElement*, bool> query_element_matched;
     std::vector<QueryID> matched_query_ids; //matched ids
     Document doc;
@@ -168,7 +193,7 @@ ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
                 if (query_element_matched.find(&(*query_element_iterator)) != query_element_matched.end()) { // already matched entries
                     continue;
                 }
-                int dist = 0;
+                int dist = 4;
                 switch (query_element_iterator->match_type) {
                 case MT_EXACT_MATCH:
                     dist = hamming_distance(query_element_iterator->query_str, b, nb) == 0 ? 0 : 4;
@@ -177,10 +202,13 @@ ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
                     dist = hamming_distance(query_element_iterator->query_str, b, nb);
                     break;
                 case MT_EDIT_DIST:
-                    dist = edit_distance(query_element_iterator->query_str, b, nb, query_element_iterator->match_dist);
+                    dist = edit_distance(query_element_iterator->query_str, b, nb, query_element_iterator->match_dist + 1);
                     break;
                 }
                 if (dist <= query_element_iterator->match_dist) {
+                    if (query_match_count.find(query_element_iterator->query_id) == query_match_count.end()) {
+                        query_match_count[query_element_iterator->query_id] = 0;
+                    }
                     query_match_count[query_element_iterator->query_id]++;
                     query_element_matched[&(*query_element_iterator)] = true;
                 }
@@ -192,6 +220,9 @@ ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
         if (match_count_iterator->second == query_map[match_count_iterator->first].end - query_map[match_count_iterator->first].start) {
             num_res++;
             matched_query_ids.push_back(match_count_iterator->first);
+            // if (doc_id == 48) {
+            //     std::cout << match_count_iterator->first << " has " << match_count_iterator->second << " matches from " << query_map[match_count_iterator->first].query_str << std::endl;
+            // }
         }
     }
     doc.num_res = num_res;
@@ -211,7 +242,7 @@ ErrorCode GetNextAvailRes(DocID* p_doc_id, unsigned int* p_num_res, QueryID** p_
     // Get the first undeliverd resuilt from "docs" and return it
     *p_doc_id = 0; *p_num_res = 0; *p_query_ids = 0;
     if (num_available_results == 0) return EC_NO_AVAIL_RES;
-    *p_doc_id = documents[num_available_results].doc_id; *p_num_res = documents[num_available_results].num_res; *p_query_ids = documents[num_available_results].query_ids;
+    *p_doc_id = documents[num_available_results - 1].doc_id; *p_num_res = documents[num_available_results - 1].num_res; *p_query_ids = documents[num_available_results - 1].query_ids;
     documents.erase(documents.begin() + num_available_results);
     num_available_results--;
     return EC_SUCCESS;
