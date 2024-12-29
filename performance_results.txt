@@ -1,0 +1,6 @@
+Basic Programm ohne Performance Verbesserungen
+
+#PS C:\Users\Analyst05\OneDrive - The Analysts GmbH\Dokumente\Python Programme\ACM-SIGMOD\test_driver> .\test_driver.exe ..\test_data\small_test.txt
+Start Test ...
+Your program has successfully passed all tests.
+Time=331719[5m:31s:719ms]
