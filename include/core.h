@@ -110,15 +110,15 @@ extern "C" {
     ///////////////////////////////////////////////////////////////////////////////////////////////
     //*********************************************************************************************
 
-    /**
-     * Computes the hamming distance between two strings.
-     */
-    int hamming_distance(const char* a, const char* b, int nb);
+    // /**
+    //  * Computes the hamming distance between two strings.
+    //  */
+    // int hamming_distance(const char* a, const char* b, int nb);
 
-    /**
-     * Computes the edit distance between two strings.
-     */
-    int edit_distance(const char* a, const char* b, int nb, int maxDist);
+    // /**
+    //  * Computes the edit distance between two strings.
+    //  */
+    // int edit_distance(const char* a, const char* b, int nb, int maxDist);
 
     /**
     * Called only once at the beginning of the whole test.
