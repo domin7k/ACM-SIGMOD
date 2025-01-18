@@ -8,6 +8,8 @@
 #include <map>
 #include <emmintrin.h> 
 #include <algorithm>
+#include "core.h"
+#include <thread>
 
 
 // computes hamming distance between a and b (both null terminated strings). 
@@ -375,6 +377,83 @@ std::vector<QueryID> edit_match(const char* word, int length, DocID doc_id) {
     return res;
 }
 
+void find_matchings(const char* doc_str, std::vector<QueryID>* query_ids, DocID doc_id, const MatchType match_type)
+{
+    std::unordered_map<std::string, bool> strings_previously_viewed;
+    int nb = 0;
+    const char* b = doc_str;
+    switch (match_type)
+    {
+    case MT_EXACT_MATCH:
+        for (const char* doc_str_iterator = doc_str; *doc_str_iterator; doc_str_iterator++) {
+            if (*doc_str_iterator == ' ') {
+                nb = doc_str_iterator - b;
+
+                char* ntc = null_terminated_copy(b, nb);
+
+                if (strings_previously_viewed.find(ntc) != strings_previously_viewed.end()) {
+                    b = doc_str_iterator + 1;
+                    continue;
+                }
+                std::string ntc_str = ntc;
+                strings_previously_viewed[ntc_str] = true;
+                //iterate over queries  
+                //add exact matches
+                std::vector<QueryID> exact_matches = exact_match(ntc, nb);
+                (*query_ids).insert((*query_ids).end(), exact_matches.begin(), exact_matches.end());
+                b = doc_str_iterator + 1;
+            }
+        }
+        break;
+    case MT_HAMMING_DIST:
+        for (const char* doc_str_iterator = doc_str; *doc_str_iterator; doc_str_iterator++) {
+            if (*doc_str_iterator == ' ') {
+                nb = doc_str_iterator - b;
+
+                char* ntc = null_terminated_copy(b, nb);
+
+                if (strings_previously_viewed.find(ntc) != strings_previously_viewed.end()) {
+                    b = doc_str_iterator + 1;
+                    continue;
+                }
+                std::string ntc_str = ntc;
+                strings_previously_viewed[ntc_str] = true;
+                //iterate over queries  
+                    //add hamming matches
+                std::vector<QueryID> hamming_matches = hamming_match(ntc, nb, doc_id);
+                (*query_ids).insert((*query_ids).end(), hamming_matches.begin(), hamming_matches.end());
+                b = doc_str_iterator + 1;
+
+            }
+        }
+        break;
+    case MT_EDIT_DIST:
+        for (const char* doc_str_iterator = doc_str; *doc_str_iterator; doc_str_iterator++) {
+            if (*doc_str_iterator == ' ') {
+                nb = doc_str_iterator - b;
+
+                char* ntc = null_terminated_copy(b, nb);
+
+                if (strings_previously_viewed.find(ntc) != strings_previously_viewed.end()) {
+                    b = doc_str_iterator + 1;
+                    continue;
+                }
+                std::string ntc_str = ntc;
+                strings_previously_viewed[ntc_str] = true;
+                //iterate over queries  
+                //add edit matches
+                std::vector<QueryID> edit_matches = edit_match(ntc, nb, doc_id);
+                (*query_ids).insert((*query_ids).end(), edit_matches.begin(), edit_matches.end());
+                b = doc_str_iterator + 1;
+
+            }
+        }
+        break;
+    default:
+        break;
+    }
+
+}
 
 
 ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
@@ -383,37 +462,27 @@ ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
     doc.doc_id = doc_id;
     int num_res = 0;
     //iterate over doc_str
-    int nb = 0;
-    const char* b = doc_str;
-    std::vector<QueryID> matched_query_ids;
+
+    std::vector<QueryID> query_ids_hamming;
+    std::vector<QueryID> query_ids_edit;
     std::vector<QueryID> query_ids;
-    for (const char* doc_str_iterator = doc_str; *doc_str_iterator; doc_str_iterator++) {
-        if (*doc_str_iterator == ' ') {
-            nb = doc_str_iterator - b;
 
-            char* ntc = null_terminated_copy(b, nb);
+    std::thread edit_matcher(find_matchings, doc_str, &query_ids_edit, doc_id, MT_EDIT_DIST);
+    std::thread hamming_matcher(find_matchings, doc_str, &query_ids_hamming, doc_id, MT_HAMMING_DIST);
 
-            if (strings_previously_viewed.find(ntc) != strings_previously_viewed.end()) {
-                b = doc_str_iterator + 1;
-                continue;
-            }
-            std::string ntc_str = ntc;
-            strings_previously_viewed[ntc_str] = true;
-            //iterate over queries  
-            //add exact matches
-            std::vector<QueryID> exact_matches = exact_match(ntc, nb);
-            query_ids.insert(query_ids.end(), exact_matches.begin(), exact_matches.end());
-            //add hamming matches
-            std::vector<QueryID> hamming_matches = hamming_match(ntc, nb, doc_id);
-            query_ids.insert(query_ids.end(), hamming_matches.begin(), hamming_matches.end());
-            //add edit matches
-            std::vector<QueryID> edit_matches = edit_match(ntc, nb, doc_id);
-            query_ids.insert(query_ids.end(), edit_matches.begin(), edit_matches.end());
-            b = doc_str_iterator + 1;
-        }
-    }
+    find_matchings(doc_str, &query_ids, doc_id, MT_EXACT_MATCH);
+
+    hamming_matcher.join();
+    edit_matcher.join();
+
+    // Add query ids from hamming and edit distance to others
+    query_ids.insert(query_ids.end(), query_ids_hamming.begin(), query_ids_hamming.end());
+    query_ids.insert(query_ids.end(), query_ids_edit.begin(), query_ids_edit.end());
+
+
 
     std::map<int, int> count_map;
+    std::vector<QueryID> matched_query_ids;
     for (const QueryID& elem : query_ids) {
         count_map[elem]++;
     }
