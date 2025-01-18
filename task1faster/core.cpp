@@ -67,6 +67,7 @@ int EditDistanceRef(const char* a, int na, const char* b, int nb, int maxDist)
         T[cur][ib] = ia;
 
         int minDist = oo;
+
         for (ib = 1;ib <= nb;ib++)
         {
             int ret = oo;
@@ -355,7 +356,15 @@ std::vector<QueryID> edit_match(const char* word, int length, DocID doc_id) {
             }
         }
     }
-    for (int i = length - 3; i <= length + 3; i++) {
+    for (int i = length - 3; i <= length - 1; i++) {
+        for (auto& query : queriesEditDist3[i]) {
+            if (query.found_in_doc < doc_id && edit_distance(word, query.query_str, length, i, 4) <= 3) {
+                query.found_in_doc = doc_id;
+                res.push_back(query.query_id);
+            }
+        }
+    }
+    for (int i = length; i <= length + 3; i++) {
         for (auto& query : queriesEditDist3[i]) {
             if (query.found_in_doc < doc_id && edit_distance(query.query_str, word, i, length, 4) <= 3) {
                 query.found_in_doc = doc_id;
