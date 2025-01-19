@@ -113,11 +113,17 @@ struct Query {
     std::vector<QueryElement*> query_elements; // for freeing
 };
 
-struct Document
+struct Result
 {
     DocID doc_id;
     int num_res;
     QueryID* query_ids;
+};
+
+struct Document
+{
+    DocID doc_id;
+    char* doc_str;
 };
 
 // stores the query elements in a vector
@@ -132,8 +138,12 @@ std::vector<QueryElement> queriesEditDist3[MAX_WORD_LENGTH + 1];
 std::unordered_map<QueryID, Query> query_map;
 // stores the number of matches for each query
 std::map<QueryID, int> query_match_count;
+// buffers the input documents
+std::vector<Document> documents_buffer;
+//number of buffered documents
+int num_buffered_documents = 0;
 // stores results
-std::vector<Document> documents;
+std::vector<Result> available_results;
 // number of available results
 int num_available_results = 0;
 
@@ -216,87 +226,7 @@ QueryElement* addToRightVector(MatchType match_type, unsigned int match_dist, co
     }
 }
 
-ErrorCode StartQuery(QueryID query_id, const char* query_str, MatchType match_type, unsigned int match_dist) {
-    const char* c_start = query_str;
-    int n_words = 0;
-    std::vector<QueryElement*> q_words = std::vector<QueryElement*>(MAX_QUERY_WORDS);
-    for (const char* it = query_str; *it; it++) {
-        if (*it == ' ') {
 
-            q_words[n_words] = addToRightVector(match_type, match_dist, c_start, it - c_start, query_id);
-            n_words++;
-            c_start = it + 1;
-
-        }
-    }
-    // add last word
-
-    q_words[n_words] = addToRightVector(match_type, match_dist, c_start, query_str + strlen(query_str) - c_start, query_id);
-    query_map[query_id] = { match_type, match_dist, q_words };
-    query_match_count[query_id] = n_words + 1;
-    return EC_SUCCESS;
-}
-
-ErrorCode EndQuery(QueryID query_id) {
-    if (query_map.find(query_id) == query_map.end()) {
-        return EC_FAIL;
-    }
-    Query q = query_map[query_id];
-    switch (q.match_type)
-    {
-    case MT_EXACT_MATCH:
-        for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
-            queriesExactMatch[i].erase(std::remove_if(queriesExactMatch[i].begin(), queriesExactMatch[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesExactMatch[i].end());
-        }
-        break;
-    case MT_HAMMING_DIST:
-        switch (q.match_dist)
-        {
-        case 1:
-            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
-                queriesHammingDist1[i].erase(std::remove_if(queriesHammingDist1[i].begin(), queriesHammingDist1[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesHammingDist1[i].end());
-            }
-            break;
-        case 2:
-            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
-                queriesHammingDist2[i].erase(std::remove_if(queriesHammingDist2[i].begin(), queriesHammingDist2[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesHammingDist2[i].end());
-            }
-            break;
-        case 3:
-            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
-                queriesHammingDist3[i].erase(std::remove_if(queriesHammingDist3[i].begin(), queriesHammingDist3[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesHammingDist3[i].end());
-            }
-            break;
-        default:
-            break;
-        }
-    case MT_EDIT_DIST:
-        switch (q.match_dist)
-        {
-        case 1:
-            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
-                queriesEditDist1[i].erase(std::remove_if(queriesEditDist1[i].begin(), queriesEditDist1[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesEditDist1[i].end());
-            }
-            break;
-        case 2:
-            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
-                queriesEditDist2[i].erase(std::remove_if(queriesEditDist2[i].begin(), queriesEditDist2[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesEditDist2[i].end());
-            }
-            break;
-        case 3:
-            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
-                queriesEditDist3[i].erase(std::remove_if(queriesEditDist3[i].begin(), queriesEditDist3[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesEditDist3[i].end());
-            }
-            break;
-        default:
-            break;
-        }
-    }
-
-    query_map.erase(query_id);
-
-    return EC_SUCCESS;
-}
 
 std::vector<QueryID> exact_match(const char* word, int length) {
     std::vector<QueryID> res;
@@ -378,8 +308,14 @@ std::vector<QueryID> edit_match(const char* word, int length, DocID doc_id) {
 
 
 ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
+    documents_buffer.push_back({ doc_id, null_terminated_copy(doc_str, strlen(doc_str)) });
+    num_buffered_documents++;
+    return EC_SUCCESS;
+}
+
+void match_document(DocID doc_id, const char* doc_str, std::vector<Result>* results, int* num_results) {
     std::unordered_map<std::string, bool> strings_previously_viewed = std::unordered_map<std::string, bool>();
-    Document doc;
+    Result doc;
     doc.doc_id = doc_id;
     int num_res = 0;
     //iterate over doc_str
@@ -431,18 +367,115 @@ ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
         doc.query_ids[i] = matched_query_ids[i];
     }
     if (num_res > 0) {
-        num_available_results++;
-        documents.push_back(doc);
+        (*num_results)++;
+        (*results).push_back(doc);
     }
-    return EC_SUCCESS;
+}
+
+void match_buffer() {
+    for (int i = 0; i < num_buffered_documents; i++) {
+        std::vector<Result> results;
+        int num_results = 0;
+        match_document(documents_buffer[i].doc_id, documents_buffer[i].doc_str, &results, &num_results);
+        available_results.insert(available_results.end(), results.begin(), results.end());
+        num_available_results += num_results;
+        free(documents_buffer[i].doc_str);
+    }
+    documents_buffer.clear();
+    num_buffered_documents = 0;
 }
 
 ErrorCode GetNextAvailRes(DocID* p_doc_id, unsigned int* p_num_res, QueryID** p_query_ids) {
+    match_buffer();
     // Get the first undeliverd resuilt from "docs" and return it
     *p_doc_id = 0; *p_num_res = 0; *p_query_ids = 0;
     if (num_available_results == 0) return EC_NO_AVAIL_RES;
-    *p_doc_id = documents[num_available_results - 1].doc_id; *p_num_res = documents[num_available_results - 1].num_res; *p_query_ids = documents[num_available_results - 1].query_ids;
-    documents.erase(documents.begin() + num_available_results);
+    *p_doc_id = available_results[num_available_results - 1].doc_id; *p_num_res = available_results[num_available_results - 1].num_res; *p_query_ids = available_results[num_available_results - 1].query_ids;
+    available_results.erase(available_results.begin() + num_available_results);
     num_available_results--;
+    return EC_SUCCESS;
+}
+
+ErrorCode StartQuery(QueryID query_id, const char* query_str, MatchType match_type, unsigned int match_dist) {
+    match_buffer();
+    const char* c_start = query_str;
+    int n_words = 0;
+    std::vector<QueryElement*> q_words = std::vector<QueryElement*>(MAX_QUERY_WORDS);
+    for (const char* it = query_str; *it; it++) {
+        if (*it == ' ') {
+
+            q_words[n_words] = addToRightVector(match_type, match_dist, c_start, it - c_start, query_id);
+            n_words++;
+            c_start = it + 1;
+
+        }
+    }
+    // add last word
+
+    q_words[n_words] = addToRightVector(match_type, match_dist, c_start, query_str + strlen(query_str) - c_start, query_id);
+    query_map[query_id] = { match_type, match_dist, q_words };
+    query_match_count[query_id] = n_words + 1;
+    return EC_SUCCESS;
+}
+
+ErrorCode EndQuery(QueryID query_id) {
+    match_buffer();
+    if (query_map.find(query_id) == query_map.end()) {
+        return EC_FAIL;
+    }
+    Query q = query_map[query_id];
+    switch (q.match_type)
+    {
+    case MT_EXACT_MATCH:
+        for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
+            queriesExactMatch[i].erase(std::remove_if(queriesExactMatch[i].begin(), queriesExactMatch[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesExactMatch[i].end());
+        }
+        break;
+    case MT_HAMMING_DIST:
+        switch (q.match_dist)
+        {
+        case 1:
+            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
+                queriesHammingDist1[i].erase(std::remove_if(queriesHammingDist1[i].begin(), queriesHammingDist1[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesHammingDist1[i].end());
+            }
+            break;
+        case 2:
+            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
+                queriesHammingDist2[i].erase(std::remove_if(queriesHammingDist2[i].begin(), queriesHammingDist2[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesHammingDist2[i].end());
+            }
+            break;
+        case 3:
+            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
+                queriesHammingDist3[i].erase(std::remove_if(queriesHammingDist3[i].begin(), queriesHammingDist3[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesHammingDist3[i].end());
+            }
+            break;
+        default:
+            break;
+        }
+    case MT_EDIT_DIST:
+        switch (q.match_dist)
+        {
+        case 1:
+            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
+                queriesEditDist1[i].erase(std::remove_if(queriesEditDist1[i].begin(), queriesEditDist1[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesEditDist1[i].end());
+            }
+            break;
+        case 2:
+            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
+                queriesEditDist2[i].erase(std::remove_if(queriesEditDist2[i].begin(), queriesEditDist2[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesEditDist2[i].end());
+            }
+            break;
+        case 3:
+            for (int i = 0; i <= MAX_WORD_LENGTH; i++) {
+                queriesEditDist3[i].erase(std::remove_if(queriesEditDist3[i].begin(), queriesEditDist3[i].end(), [query_id](QueryElement& query) {return query.query_id == query_id; }), queriesEditDist3[i].end());
+            }
+            break;
+        default:
+            break;
+        }
+    }
+
+    query_map.erase(query_id);
+
     return EC_SUCCESS;
 }
