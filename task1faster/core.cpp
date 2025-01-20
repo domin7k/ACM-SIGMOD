@@ -8,6 +8,8 @@
 #include <map>
 #include <emmintrin.h> 
 #include <algorithm>
+#include <thread>
+#include <mutex>
 
 
 // computes hamming distance between a and b (both null terminated strings). 
@@ -147,6 +149,8 @@ std::vector<Result> available_results;
 // number of available results
 int num_available_results = 0;
 
+std::mutex mtx;
+
 // Function to create a null-terminated copy of b
 char* null_terminated_copy(const char* b, int nb) {
     char* b_copy = new char[nb + 1];
@@ -239,65 +243,72 @@ std::vector<QueryID> exact_match(const char* word, int length) {
     return res;
 }
 
-std::vector<QueryID> hamming_match(const char* word, int length, DocID doc_id) {
+std::vector<QueryID> hamming_match(const char* word, int length, DocID doc_id, std::unordered_map<QueryElement*, DocID>* visitedQueries) {
     std::vector<QueryID> res;
 
     for (auto& query : queriesHammingDist1[length]) {
 
-        if (query.found_in_doc < doc_id && hamming_distance(query.query_str, word, length, length, 1) <= 1) {
-            query.found_in_doc = doc_id;
+        auto it = (*visitedQueries).find(&query);
+        if ((it == (*visitedQueries).end() || it->second < doc_id) && hamming_distance(query.query_str, word, length, length, 1) <= 1) {
+            (*visitedQueries)[&query] = doc_id;
             res.push_back(query.query_id);
 
         }
     }
 
     for (auto& query : queriesHammingDist2[length]) {
-        if (query.found_in_doc < doc_id && hamming_distance(query.query_str, word, length, length, 2) <= 2) {
-            query.found_in_doc = doc_id;
+        auto it = (*visitedQueries).find(&query);
+        if ((it == (*visitedQueries).end() || it->second < doc_id) && hamming_distance(query.query_str, word, length, length, 2) <= 2) {
+            (*visitedQueries)[&query] = doc_id;
             res.push_back(query.query_id);
         }
     }
 
     for (auto& query : queriesHammingDist3[length]) {
 
-        if (query.found_in_doc < doc_id && hamming_distance(query.query_str, word, length, length, 3) <= 3) {
-            query.found_in_doc = doc_id;
+        auto it = (*visitedQueries).find(&query);
+        if ((it == (*visitedQueries).end() || it->second < doc_id) && hamming_distance(query.query_str, word, length, length, 3) <= 3) {
+            (*visitedQueries)[&query] = doc_id;
             res.push_back(query.query_id);
         }
     }
     return res;
 }
 
-std::vector<QueryID> edit_match(const char* word, int length, DocID doc_id) {
+std::vector<QueryID> edit_match(const char* word, int length, DocID doc_id, std::unordered_map<QueryElement*, DocID>* visitedQueries) {
     std::vector<QueryID> res;
     for (int i = length - 1; i <= length + 1; i++) {
         for (auto& query : queriesEditDist1[i]) {
-            if (query.found_in_doc < doc_id && edit_distance(query.query_str, word, i, length, 2) <= 1) {
-                query.found_in_doc = doc_id;
+            auto it = (*visitedQueries).find(&query);
+            if ((it == (*visitedQueries).end() || it->second < doc_id) && edit_distance(query.query_str, word, i, length, 2) <= 1) {
+                (*visitedQueries)[&query] = doc_id;
                 res.push_back(query.query_id);
             }
         }
     }
     for (int i = length - 2; i <= length + 2; i++) {
         for (auto& query : queriesEditDist2[i]) {
-            if (query.found_in_doc < doc_id && edit_distance(query.query_str, word, i, length, 3) <= 2) {
-                query.found_in_doc = doc_id;
+            auto it = (*visitedQueries).find(&query);
+            if ((it == (*visitedQueries).end() || it->second < doc_id) && edit_distance(query.query_str, word, i, length, 3) <= 2) {
+                (*visitedQueries)[&query] = doc_id;
                 res.push_back(query.query_id);
             }
         }
     }
     for (int i = length - 3; i <= length - 1; i++) {
         for (auto& query : queriesEditDist3[i]) {
-            if (query.found_in_doc < doc_id && edit_distance(word, query.query_str, length, i, 4) <= 3) {
-                query.found_in_doc = doc_id;
+            auto it = (*visitedQueries).find(&query);
+            if ((it == (*visitedQueries).end() || it->second < doc_id) && edit_distance(word, query.query_str, length, i, 4) <= 3) {
+                (*visitedQueries)[&query] = doc_id;
                 res.push_back(query.query_id);
             }
         }
     }
     for (int i = length; i <= length + 3; i++) {
         for (auto& query : queriesEditDist3[i]) {
-            if (query.found_in_doc < doc_id && edit_distance(query.query_str, word, i, length, 4) <= 3) {
-                query.found_in_doc = doc_id;
+            auto it = (*visitedQueries).find(&query);
+            if ((it == (*visitedQueries).end() || it->second < doc_id) && edit_distance(query.query_str, word, i, length, 4) <= 3) {
+                (*visitedQueries)[&query] = doc_id;
                 res.push_back(query.query_id);
             }
         }
@@ -306,14 +317,7 @@ std::vector<QueryID> edit_match(const char* word, int length, DocID doc_id) {
 }
 
 
-
-ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
-    documents_buffer.push_back({ doc_id, null_terminated_copy(doc_str, strlen(doc_str)) });
-    num_buffered_documents++;
-    return EC_SUCCESS;
-}
-
-void match_document(DocID doc_id, const char* doc_str, std::vector<Result>* results, int* num_results) {
+void match_document(DocID doc_id, const char* doc_str, std::vector<Result>* results, int* num_results, std::unordered_map<QueryElement*, DocID>* visitedQueries) {
     std::unordered_map<std::string, bool> strings_previously_viewed = std::unordered_map<std::string, bool>();
     Result doc;
     doc.doc_id = doc_id;
@@ -340,10 +344,10 @@ void match_document(DocID doc_id, const char* doc_str, std::vector<Result>* resu
             std::vector<QueryID> exact_matches = exact_match(ntc, nb);
             query_ids.insert(query_ids.end(), exact_matches.begin(), exact_matches.end());
             //add hamming matches
-            std::vector<QueryID> hamming_matches = hamming_match(ntc, nb, doc_id);
+            std::vector<QueryID> hamming_matches = hamming_match(ntc, nb, doc_id, visitedQueries);
             query_ids.insert(query_ids.end(), hamming_matches.begin(), hamming_matches.end());
             //add edit matches
-            std::vector<QueryID> edit_matches = edit_match(ntc, nb, doc_id);
+            std::vector<QueryID> edit_matches = edit_match(ntc, nb, doc_id, visitedQueries);
             query_ids.insert(query_ids.end(), edit_matches.begin(), edit_matches.end());
             b = doc_str_iterator + 1;
         }
@@ -354,10 +358,14 @@ void match_document(DocID doc_id, const char* doc_str, std::vector<Result>* resu
         count_map[elem]++;
     }
 
-    for (const auto& pair : count_map) {
-        if (pair.second >= query_match_count[pair.first]) {
-            matched_query_ids.push_back(pair.first);
-            num_res++;
+
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        for (const auto& pair : count_map) {
+            if (pair.second >= query_match_count[pair.first]) {
+                matched_query_ids.push_back(pair.first);
+                num_res++;
+            }
         }
     }
 
@@ -372,14 +380,46 @@ void match_document(DocID doc_id, const char* doc_str, std::vector<Result>* resu
     }
 }
 
+void match_x_documents(int x, int first, std::vector<Result>* results, int* num_results = 0) {
+    std::unordered_map<QueryElement*, unsigned int> visitedQueries;
+    printf("first: %d\n, last: %d\n", first, first + x - 1);
+    for (int i = first; i < first + x; i++) {
+        match_document(documents_buffer[i].doc_id, documents_buffer[i].doc_str, results, num_results, &visitedQueries);
+    }
+}
+
 void match_buffer() {
-    for (int i = 0; i < num_buffered_documents; i++) {
+    if (num_buffered_documents == 0) return;
+    if (num_buffered_documents < 10) {
         std::vector<Result> results;
         int num_results = 0;
-        match_document(documents_buffer[i].doc_id, documents_buffer[i].doc_str, &results, &num_results);
+        match_x_documents(num_buffered_documents, 0, &results, &num_results);
         available_results.insert(available_results.end(), results.begin(), results.end());
         num_available_results += num_results;
-        free(documents_buffer[i].doc_str);
+    }
+    else {
+        printf("num_buffered_documents: %d\n", num_buffered_documents);
+        int num_threads = 4;
+        int docs_per_thread = num_buffered_documents / num_threads;
+        int remaining_docs = num_buffered_documents % docs_per_thread;
+        int start = 0;
+        std::thread threads[num_threads];
+        std::vector<Result> results[num_threads];
+        int num_results[num_threads];
+        for (int i = 0; i < num_threads; i++) {
+            results[i] = std::vector<Result>();
+            num_results[i] = 0;
+            int docs_for_this_thread = docs_per_thread + (i < remaining_docs ? 1 : 0);
+            threads[i] = std::thread(match_x_documents, docs_for_this_thread, start, &(results[i]), &(num_results[i]));
+            start += docs_for_this_thread;
+        }
+        for (int i = 0; i < num_threads; i++) {
+            threads[i].join();
+        }
+        for (int i = 0; i < num_threads; i++) {
+            available_results.insert(available_results.end(), results[i].begin(), results[i].end());
+            num_available_results += num_results[i];
+        }
     }
     documents_buffer.clear();
     num_buffered_documents = 0;
@@ -390,6 +430,7 @@ ErrorCode GetNextAvailRes(DocID* p_doc_id, unsigned int* p_num_res, QueryID** p_
     // Get the first undeliverd resuilt from "docs" and return it
     *p_doc_id = 0; *p_num_res = 0; *p_query_ids = 0;
     if (num_available_results == 0) return EC_NO_AVAIL_RES;
+    printf("returning result with id: %d\n", available_results[num_available_results - 1].doc_id);
     *p_doc_id = available_results[num_available_results - 1].doc_id; *p_num_res = available_results[num_available_results - 1].num_res; *p_query_ids = available_results[num_available_results - 1].query_ids;
     available_results.erase(available_results.begin() + num_available_results);
     num_available_results--;
@@ -477,5 +518,14 @@ ErrorCode EndQuery(QueryID query_id) {
 
     query_map.erase(query_id);
 
+    return EC_SUCCESS;
+}
+
+ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
+    documents_buffer.push_back({ doc_id, null_terminated_copy(doc_str, strlen(doc_str)) });
+    num_buffered_documents++;
+    if (num_buffered_documents >= 200) {
+        match_buffer();
+    }
     return EC_SUCCESS;
 }
