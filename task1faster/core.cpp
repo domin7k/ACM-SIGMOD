@@ -323,7 +323,8 @@ void match_document(DocID doc_id, const char* doc_str, std::vector<Result>* resu
     const char* b = doc_str;
     std::vector<QueryID> matched_query_ids;
     std::vector<QueryID> query_ids;
-    for (const char* doc_str_iterator = doc_str; *doc_str_iterator; doc_str_iterator++) {
+    const char* doc_str_iterator;
+    for (doc_str_iterator = doc_str; *doc_str_iterator; doc_str_iterator++) {
         if (*doc_str_iterator == ' ') {
             nb = doc_str_iterator - b;
 
@@ -348,6 +349,32 @@ void match_document(DocID doc_id, const char* doc_str, std::vector<Result>* resu
             b = doc_str_iterator + 1;
         }
     }
+
+    // handle last word
+    nb = doc_str_iterator - b;
+
+    char* ntc = null_terminated_copy(b, nb);
+
+    if (strings_previously_viewed.find(ntc) != strings_previously_viewed.end()) {
+        b = doc_str_iterator + 1;
+
+    }
+    else {
+        std::string ntc_str = ntc;
+        strings_previously_viewed[ntc_str] = true;
+        //iterate over queries  
+        //add exact matches
+        std::vector<QueryID> exact_matches = exact_match(ntc, nb);
+        query_ids.insert(query_ids.end(), exact_matches.begin(), exact_matches.end());
+        //add hamming matches
+        std::vector<QueryID> hamming_matches = hamming_match(ntc, nb, doc_id);
+        query_ids.insert(query_ids.end(), hamming_matches.begin(), hamming_matches.end());
+        //add edit matches
+        std::vector<QueryID> edit_matches = edit_match(ntc, nb, doc_id);
+        query_ids.insert(query_ids.end(), edit_matches.begin(), edit_matches.end());
+        b = doc_str_iterator + 1;
+    }
+
 
     std::map<int, int> count_map;
     for (const QueryID& elem : query_ids) {

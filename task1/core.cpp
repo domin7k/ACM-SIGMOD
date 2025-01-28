@@ -152,9 +152,6 @@ ErrorCode EndQuery(QueryID query_id) {
     }
     Query q = query_map[query_id];
 
-    // Check if q.start and q.end are within bounds
-    assert(q.start >= 0 && q.start <= queries.size() && "q.start is out of bounds");
-    assert(q.end >= 0 && q.end <= queries.size() && "q.end is out of bounds");
 
     queries.erase(std::next(queries.begin(), q.start), std::next(queries.begin(), q.end));
     //update query map
@@ -186,7 +183,8 @@ ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
     //iterate over doc_str
     int nb = 0;
     const char* b = doc_str;
-    for (const char* doc_str_iterator = doc_str; *doc_str_iterator; doc_str_iterator++) {
+    const char* doc_str_iterator;
+    for (doc_str_iterator = doc_str; *doc_str_iterator; doc_str_iterator++) {
         if (*doc_str_iterator == ' ') {
             nb = doc_str_iterator - b;
             for (auto query_element_iterator = queries.begin(); query_element_iterator != queries.end(); query_element_iterator++) {
@@ -216,6 +214,34 @@ ErrorCode MatchDocument(DocID doc_id, const char* doc_str) {
             b = doc_str_iterator + 1;
         }
     }
+
+    nb = doc_str_iterator - b;
+    for (auto query_element_iterator = queries.begin(); query_element_iterator != queries.end(); query_element_iterator++) {
+        if (!(query_element_matched.find(&(*query_element_iterator)) != query_element_matched.end())) { // already matched entries
+
+
+            int dist = 4;
+            switch (query_element_iterator->match_type) {
+            case MT_EXACT_MATCH:
+                dist = hamming_distance(query_element_iterator->query_str, b, nb) == 0 ? 0 : 4;
+                break;
+            case MT_HAMMING_DIST:
+                dist = hamming_distance(query_element_iterator->query_str, b, nb);
+                break;
+            case MT_EDIT_DIST:
+                dist = edit_distance(query_element_iterator->query_str, b, nb, query_element_iterator->match_dist + 1);
+                break;
+            }
+            if (dist <= query_element_iterator->match_dist) {
+                if (query_match_count.find(query_element_iterator->query_id) == query_match_count.end()) {
+                    query_match_count[query_element_iterator->query_id] = 0;
+                }
+                query_match_count[query_element_iterator->query_id]++;
+                query_element_matched[&(*query_element_iterator)] = true;
+            }
+        }
+    }
+
     for (auto match_count_iterator = query_match_count.begin(); match_count_iterator != query_match_count.end(); match_count_iterator++) {
         if (match_count_iterator->second == query_map[match_count_iterator->first].end - query_map[match_count_iterator->first].start) {
             num_res++;
