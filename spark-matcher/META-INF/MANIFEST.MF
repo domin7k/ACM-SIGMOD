@@ -1,0 +1,9 @@
+Manifest-Version: 1.0
+Specification-Title: spark-matcher
+Specification-Version: 1.0
+Specification-Vendor: default
+Implementation-Title: spark-matcher
+Implementation-Version: 1.0
+Implementation-Vendor: default
+Implementation-Vendor-Id: default
+
